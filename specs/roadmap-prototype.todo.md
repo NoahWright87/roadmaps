@@ -22,38 +22,31 @@ followed by richer features like a backlog panel and filtering.
 
 ### Custom category colors
 
-- [ ] Each category has a user-assignable color
-- [ ] Color is reflected on all timeline bars belonging to that category
-- [ ] Color can be set in the category editor (palette or color picker)
-- [ ] Color persists with the roadmap data
-
-### Hover tooltips on initiative bars
-
-- [x] Hovering a bar shows a tooltip: title, date range, description snippet
-- [x] No click required — tooltip replaces the need to open the modal for basic info
-- [x] Tooltip dismisses on mouse-out
-- [x] Works in both View and Edit modes
+- [x] Each category has a user-assignable color
+- [x] Color is reflected on all timeline bars belonging to that category
+- [x] Color can be set in the category editor (palette or color picker)
+- [x] Color persists with the roadmap data
 
 ### User-adjustable date window
 
-- [ ] Replace the fixed date window with user-adjustable controls on the page
-- [ ] Controls support shifting the window (earlier/later) and zooming (wider/narrower range)
-- [ ] Window adjusts per-session; no persistence required initially
-- [ ] Initiatives outside the visible window are hidden or clipped
+- [x] Replace the fixed date window with user-adjustable controls on the page
+- [x] Controls support shifting the window (earlier/later) and zooming — Yearly/Quarterly selector + ← / → navigator
+- [x] Window adjusts per-session; no persistence required initially
+- [x] Initiatives outside the visible window are hidden or clipped
 
 ### General UI polish
 
 - [ ] Improve typography, spacing, and color palette to suit a leadership-facing tool
-- [ ] Improve the visual design of the Edit/View mode toggle
+- [x] Improve the visual design of the Edit/View mode toggle — segmented View/Edit control
 - [ ] Review overall layout for at-a-glance readability
 
 ## Later
 
 ### Initiative progress indicator
 
-- [ ] Add a progress percentage field (0–100%) to the initiative form
-- [ ] Visualize progress as a radial/pie fill inside or beside the timeline bar
-- [ ] No full lifecycle state machine needed — just a numeric percentage
+- [x] Add a progress percentage field (0–100%) to the initiative form
+- [x] Visualize progress as a radial/pie fill inside or beside the timeline bar
+- [x] No full lifecycle state machine needed — just a numeric percentage
 - [ ] Clarify how backlog items interact with progress (likely default to 0%)
 
 ### Backlog panel for unscheduled work

@@ -199,6 +199,20 @@ function endOfMonthISO(ym) {
   return toISODate(d);
 }
 
+function snapToQuarter(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const qStart = Math.floor((m - 1) / 3) * 3 + 1; // 1, 4, 7, or 10
+  return {
+    startYm: `${y}-${String(qStart).padStart(2, "0")}`,
+    endYm: `${y}-${String(qStart + 2).padStart(2, "0")}`,
+  };
+}
+
+function snapToYear(ym) {
+  const [y] = ym.split("-").map(Number);
+  return { startYm: `${y}-01`, endYm: `${y}-12` };
+}
+
 function formatDateRange(startDate, endDate) {
   const fmt = (iso) => {
     const d = parseISODateLocal(iso);
@@ -253,6 +267,27 @@ function labelFontSizePx(spanLen) {
   return 10;
 }
 
+const DEFAULT_BAR_COLOR = "#3b82f6"; // Tailwind blue-500
+
+function ProgressRing({ pct }) {
+  if (!pct) return null;
+  const r = 7;
+  const circ = 2 * Math.PI * r;
+  const dash = (clamp(pct, 0, 100) / 100) * circ;
+  return (
+    <svg width="18" height="18" className="shrink-0" aria-label={`${pct}% complete`}>
+      <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="2" />
+      <circle
+        cx="9" cy="9" r={r}
+        fill="none" stroke="currentColor" strokeWidth="2"
+        strokeDasharray={`${dash} ${circ}`}
+        strokeLinecap="round"
+        transform="rotate(-90 9 9)"
+      />
+    </svg>
+  );
+}
+
 export default function RoadmapTimelineMock() {
   const today = new Date();
   const currentYear = today.getFullYear();
@@ -261,6 +296,20 @@ export default function RoadmapTimelineMock() {
 
   const [windowStartYm, setWindowStartYm] = useState(defaultStartYm);
   const [windowEndYm, setWindowEndYm] = useState(defaultEndYm);
+  const [windowMode, setWindowMode] = useState("year"); // "year" | "quarter"
+
+  function handleModeChange(newMode) {
+    setWindowMode(newMode);
+    if (newMode === "quarter") {
+      const { startYm, endYm } = snapToQuarter(windowStartYm);
+      setWindowStartYm(startYm);
+      setWindowEndYm(endYm);
+    } else {
+      const { startYm, endYm } = snapToYear(windowStartYm);
+      setWindowStartYm(startYm);
+      setWindowEndYm(endYm);
+    }
+  }
 
   // View vs Edit mode
   // - View: initiatives may be lane-packed within categories (non-overlapping share a row)
@@ -389,10 +438,14 @@ export default function RoadmapTimelineMock() {
           links: [],
           startDate: startOfMonthISO(startYm),
           endDate: endOfMonthISO(endYm),
+          progress: 0,
         };
       })();
 
-    setDraft(JSON.parse(JSON.stringify(base)));
+    setDraft(JSON.parse(JSON.stringify({
+      ...base,
+      categoryColor: categoryColors[(base.category || "").trim() || "Uncategorized"] || "",
+    })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalOpen, editingId]);
 
@@ -418,8 +471,11 @@ export default function RoadmapTimelineMock() {
     const snapped = snapDateRangeToMonthBounds(draft.startDate, draft.endDate);
     if (!snapped) return;
 
+    // Strip UI-only draft fields before persisting to initiatives
+    const { categoryColor, ...draftData } = draft;
+
     const cleaned = {
-      ...draft,
+      ...draftData,
       category: (draft.category || "Uncategorized").trim() || "Uncategorized",
       title: draft.title.trim(),
       description: (draft.description || "").trim(),
@@ -431,6 +487,7 @@ export default function RoadmapTimelineMock() {
         })),
       startDate: snapped.startDate,
       endDate: snapped.endDate,
+      progress: clamp(Math.round(draft.progress || 0), 0, 100),
     };
 
     setInitiatives((prev) => {
@@ -438,6 +495,10 @@ export default function RoadmapTimelineMock() {
       if (!exists) return [...prev, cleaned];
       return prev.map((p) => (p.id === cleaned.id ? cleaned : p));
     });
+
+    if (categoryColor) {
+      setCategoryColors((prev) => ({ ...prev, [cleaned.category]: categoryColor }));
+    }
 
     closeModal();
   }
@@ -463,6 +524,17 @@ export default function RoadmapTimelineMock() {
 
   const [, forceRerender] = useState(0);
   const [tooltipState, setTooltipState] = useState({ it: null, x: 0, y: 0 });
+  const [categoryColors, setCategoryColors] = useState({});
+
+  function shiftWindow(months) {
+    const shift = (ym) => {
+      const d = ymToDate(ym);
+      d.setMonth(d.getMonth() + months);
+      return dateToYm(d);
+    };
+    setWindowStartYm((prev) => shift(prev));
+    setWindowEndYm((prev) => shift(prev));
+  }
 
   function beginDrag(initiativeId, mode, cellIdx, startIdx, endIdx) {
     const len = endIdx - startIdx;
@@ -569,6 +641,13 @@ export default function RoadmapTimelineMock() {
     };
   }
 
+  const windowLabel = useMemo(() => {
+    const [y, m] = windowStartYm.split("-").map(Number);
+    if (windowMode === "year") return `${y}`;
+    const q = Math.floor((m - 1) / 3) + 1;
+    return `Q${q} ${y}`;
+  }, [windowStartYm, windowMode]);
+
   const headerMonths = useMemo(() => {
     return months.map((d) => ({
       label: d.toLocaleString(undefined, { month: "short" }),
@@ -647,33 +726,39 @@ export default function RoadmapTimelineMock() {
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
-          <UnstyledLabel label="Start">
-            <input
-              className="px-3 py-2 border rounded-xl"
-              type="month"
-              value={windowStartYm}
-              onChange={(e) => setWindowStartYm(e.target.value)}
-            />
-          </UnstyledLabel>
-          <UnstyledLabel label="End">
-            <input
-              className="px-3 py-2 border rounded-xl"
-              type="month"
-              value={windowEndYm}
-              onChange={(e) => setWindowEndYm(e.target.value)}
-            />
-          </UnstyledLabel>
+          <select
+            className="px-3 py-2 border rounded-xl"
+            value={windowMode}
+            onChange={(e) => handleModeChange(e.target.value)}
+          >
+            <option value="year">Yearly</option>
+            <option value="quarter">Quarterly</option>
+          </select>
 
-          {isEditMode ? (
-            <button className="px-4 py-2 border rounded-xl" onClick={openCreate}>
-              Add Initiative
+          <div className="flex items-center gap-1">
+            <button
+              className="px-2 py-2 border rounded-xl text-sm"
+              onClick={() => shiftWindow(windowMode === "quarter" ? -3 : -12)}
+              title={windowMode === "quarter" ? "Previous quarter" : "Previous year"}
+            >
+              ←
             </button>
-          ) : null}
+            <div className="px-3 py-2 border rounded-xl text-sm font-medium min-w-[80px] text-center select-none">
+              {windowLabel}
+            </div>
+            <button
+              className="px-2 py-2 border rounded-xl text-sm"
+              onClick={() => shiftWindow(windowMode === "quarter" ? 3 : 12)}
+              title={windowMode === "quarter" ? "Next quarter" : "Next year"}
+            >
+              →
+            </button>
+          </div>
 
           <button
-            className="px-4 py-2 border rounded-xl"
+            className="px-4 py-2 border rounded-xl text-sm"
             onClick={() => setIsEditMode((v) => !v)}
-            title={isEditMode ? "Switch to view mode (lane packing)" : "Switch to edit mode (one per row)"}
+            title={isEditMode ? "Switch to view mode" : "Switch to edit mode"}
           >
             {isEditMode ? "View mode" : "Edit mode"}
           </button>
@@ -785,14 +870,19 @@ export default function RoadmapTimelineMock() {
                         const spanLen = occ.endIdx - occ.startIdx + 1;
                         const fontPx = labelFontSizePx(spanLen);
                         const shouldTruncate = spanLen <= 1;
-                        const borderColor = occ.isPreview ? "border-blue-500" : "border-blue-700";
-                        const bgClass = occ.isPreview ? "bg-blue-300" : "bg-blue-500";
+                        const catColor = categoryColors[occ.it.category] || DEFAULT_BAR_COLOR;
+                        const barStyle = {
+                          backgroundColor: catColor,
+                          borderColor: catColor,
+                          ...(occ.isPreview ? { opacity: 0.55 } : {}),
+                        };
 
                         cells.push(
                           <td
                             key={`bar-${occ.it.id}-${headerMonths[occ.startIdx]?.ym || occ.startIdx}`}
                             colSpan={spanLen}
-                            className={`h-12 border-b border-r p-0 ${bgClass} text-white border-y-2 border-x-2 ${borderColor} rounded-md`}
+                            className="h-12 border-b border-r p-0 text-white border-y-2 border-x-2 rounded-md"
+                            style={barStyle}
                           >
                             <div
                               className="h-full w-full flex items-center justify-center select-none relative cursor-pointer"
@@ -850,6 +940,12 @@ export default function RoadmapTimelineMock() {
                                 </>
                               ) : null}
 
+                              {(occ.it.progress || 0) > 0 ? (
+                                <div className="absolute top-1 right-3 pointer-events-none">
+                                  <ProgressRing pct={occ.it.progress} />
+                                </div>
+                              ) : null}
+
                               <span
                                 className={`${shouldTruncate ? "truncate" : "whitespace-normal break-words"} w-full px-2 text-center leading-tight pointer-events-none`}
                                 style={{ fontSize: `${fontPx}px` }}
@@ -873,6 +969,14 @@ export default function RoadmapTimelineMock() {
         </table>
       </div>
 
+      {isEditMode ? (
+        <div className="flex justify-center">
+          <button className="px-4 py-2 border rounded-xl text-sm" onClick={openCreate}>
+            Add Initiative
+          </button>
+        </div>
+      ) : null}
+
       <BarTooltip it={tooltipState.it} x={tooltipState.x} y={tooltipState.y} />
 
       <SimpleModal
@@ -887,7 +991,12 @@ export default function RoadmapTimelineMock() {
                 <CategoryCombobox
                   value={draft.category}
                   options={categorySuggestions}
-                  onChange={(v) => setDraft((d) => ({ ...d, category: v }))}
+                  onChange={(v) => setDraft((d) => ({
+                    ...d,
+                    category: v,
+                    // Load saved color for the new category, or keep the current draft color
+                    categoryColor: categoryColors[(v || "").trim() || "Uncategorized"] ?? d.categoryColor,
+                  }))}
                   disabled={isModalReadOnly}
                 />
               </UnstyledLabel>
@@ -900,6 +1009,62 @@ export default function RoadmapTimelineMock() {
                   onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
                   placeholder="Initiative name"
                 />
+              </UnstyledLabel>
+
+              <UnstyledLabel label={`Color — ${draft.category || "Uncategorized"}`}>
+                {isModalReadOnly ? (
+                  <div className="flex items-center gap-2 py-2">
+                    <div
+                      className="w-6 h-6 rounded-md border"
+                      style={{ backgroundColor: draft.categoryColor || DEFAULT_BAR_COLOR }}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 py-1">
+                    <input
+                      type="color"
+                      className="h-9 w-9 rounded-lg border cursor-pointer p-0.5"
+                      value={draft.categoryColor || DEFAULT_BAR_COLOR}
+                      onChange={(e) => setDraft((d) => ({ ...d, categoryColor: e.target.value }))}
+                    />
+                    {draft.categoryColor ? (
+                      <button
+                        type="button"
+                        className="text-xs text-gray-500 hover:text-gray-700 underline"
+                        onClick={() => setDraft((d) => ({ ...d, categoryColor: "" }))}
+                      >
+                        Reset to default
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">default blue</span>
+                    )}
+                  </div>
+                )}
+              </UnstyledLabel>
+
+              <UnstyledLabel label="Progress">
+                {isModalReadOnly ? (
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${draft.progress || 0}%`, backgroundColor: draft.categoryColor || DEFAULT_BAR_COLOR }}
+                      />
+                    </div>
+                    <span className="text-sm tabular-nums w-10 text-right">{draft.progress || 0}%</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 py-1">
+                    <input
+                      type="range"
+                      min="0" max="100" step="5"
+                      className="flex-1"
+                      value={draft.progress || 0}
+                      onChange={(e) => setDraft((d) => ({ ...d, progress: parseInt(e.target.value, 10) }))}
+                    />
+                    <span className="text-sm tabular-nums w-10 text-right">{draft.progress || 0}%</span>
+                  </div>
+                )}
               </UnstyledLabel>
 
               <UnstyledLabel label="Start date">
