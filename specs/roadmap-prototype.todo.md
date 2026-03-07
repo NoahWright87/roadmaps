@@ -20,33 +20,15 @@ followed by richer features like a backlog panel and filtering.
   - Empty state — no initiatives, fresh load
 - [ ] Tests should fail visibly on layout regressions before new work is merged
 
-### Custom category colors
-
-- [x] Each category has a user-assignable color
-- [x] Color is reflected on all timeline bars belonging to that category
-- [x] Color can be set in the category editor (palette or color picker)
-- [x] Color persists with the roadmap data
-
-### User-adjustable date window
-
-- [x] Replace the fixed date window with user-adjustable controls on the page
-- [x] Controls support shifting the window (earlier/later) and zooming — Yearly/Quarterly selector + ← / → navigator
-- [x] Window adjusts per-session; no persistence required initially
-- [x] Initiatives outside the visible window are hidden or clipped
-
 ### General UI polish
 
-- [ ] Improve typography, spacing, and color palette to suit a leadership-facing tool
-- [x] Improve the visual design of the Edit/View mode toggle — segmented View/Edit control
-- [ ] Review overall layout for at-a-glance readability
+- [x] Improve typography, spacing, and color palette to suit a leadership-facing tool
+- [x] Review overall layout for at-a-glance readability
 
 ## Later
 
 ### Initiative progress indicator
 
-- [x] Add a progress percentage field (0–100%) to the initiative form
-- [x] Visualize progress as a radial/pie fill inside or beside the timeline bar
-- [x] No full lifecycle state machine needed — just a numeric percentage
 - [ ] Clarify how backlog items interact with progress (likely default to 0%)
 
 ### Backlog panel for unscheduled work
@@ -60,9 +42,10 @@ followed by richer features like a backlog panel and filtering.
 
 ### Filtering in View mode
 
-- [ ] Viewers can filter displayed initiatives by category and by visible date range
-- [ ] Filters are shown as quick-toggle chips or checkboxes above the timeline
-- [ ] Active filters are visually distinct and easy to clear
+- [x] Viewers can filter displayed initiatives by category
+- [x] Filters are shown as quick-toggle chips above the timeline
+- [x] Active filters are visually distinct and easy to clear (strikethrough + opacity, "Show all" button)
+- [ ] Filter by visible date range
 - [ ] Team-based filtering is handled separately by the multi-team feature (see `multi-team.todo.md`)
 
 ## Ideas (Uncommitted)

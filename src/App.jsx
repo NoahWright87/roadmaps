@@ -293,6 +293,7 @@ export default function RoadmapTimelineMock() {
   const currentYear = today.getFullYear();
   const defaultStartYm = `${currentYear}-01`;
   const defaultEndYm = `${currentYear}-12`;
+  const todayYm = dateToYm(today);
 
   const [windowStartYm, setWindowStartYm] = useState(defaultStartYm);
   const [windowEndYm, setWindowEndYm] = useState(defaultEndYm);
@@ -407,6 +408,11 @@ export default function RoadmapTimelineMock() {
         return { category, lanes: packIntoLanes(items) };
       });
   }, [withIdx, isEditMode]);
+
+  const visiblePackedByCategory = useMemo(() => {
+    if (isEditMode || hiddenCategories.size === 0) return packedByCategory;
+    return packedByCategory.filter((g) => !hiddenCategories.has(g.category));
+  }, [packedByCategory, hiddenCategories, isEditMode]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -525,6 +531,16 @@ export default function RoadmapTimelineMock() {
   const [, forceRerender] = useState(0);
   const [tooltipState, setTooltipState] = useState({ it: null, x: 0, y: 0 });
   const [categoryColors, setCategoryColors] = useState({});
+  const [hiddenCategories, setHiddenCategories] = useState(new Set());
+
+  function toggleCategory(cat) {
+    setHiddenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }
 
   function shiftWindow(months) {
     const shift = (ym) => {
@@ -722,7 +738,7 @@ export default function RoadmapTimelineMock() {
     <div className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Roadmap Timeline</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Roadmap Timeline</h1>
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -765,19 +781,50 @@ export default function RoadmapTimelineMock() {
         </div>
       </div>
 
+      {!isEditMode && packedByCategory.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {packedByCategory.map((g) => {
+            const hidden = hiddenCategories.has(g.category);
+            const color = categoryColors[g.category] || DEFAULT_BAR_COLOR;
+            return (
+              <button
+                key={g.category}
+                onClick={() => toggleCategory(g.category)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-sm transition-opacity ${
+                  hidden ? "opacity-40 line-through" : "opacity-100"
+                }`}
+              >
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                {g.category}
+              </button>
+            );
+          })}
+          {hiddenCategories.size > 0 ? (
+            <button
+              className="text-sm text-blue-600 hover:text-blue-800 underline"
+              onClick={() => setHiddenCategories(new Set())}
+            >
+              Show all
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="border rounded-2xl overflow-hidden">
         <table ref={tableRef} className="w-full table-fixed border-collapse">
           <thead>
-            <tr className="bg-gray-50">
-              <th className="w-[180px] text-left p-2 border-b border-r text-sm font-medium">Category</th>
+            <tr className="bg-gray-100">
+              <th className="w-[180px] text-left p-2 border-b border-r text-sm font-semibold text-gray-600">Category</th>
               {isEditMode ? (
-                <th className="w-[240px] text-left p-2 border-b border-r text-sm font-medium">Initiative</th>
+                <th className="w-[240px] text-left p-2 border-b border-r text-sm font-semibold text-gray-600">Initiative</th>
               ) : null}
               {headerMonths.map((m, idx) => (
                 <th
                   key={m.ym}
                   data-month-idx={idx}
-                  className="p-2 border-b border-r text-center text-xs font-medium"
+                  className={`p-2 border-b border-r text-center text-xs font-semibold uppercase tracking-wide ${
+                    m.ym === todayYm ? "bg-blue-50 text-blue-600" : "text-gray-500"
+                  }`}
                 >
                   {m.label}
                 </th>
@@ -786,24 +833,27 @@ export default function RoadmapTimelineMock() {
           </thead>
 
           <tbody>
-            {packedByCategory.length === 0 ? (
+            {visiblePackedByCategory.length === 0 ? (
               <tr>
-                <td className="p-4 text-sm text-gray-600" colSpan={(isEditMode ? 2 : 1) + headerMonths.length}>
-                  No initiatives yet.
+                <td className="p-4 text-sm text-gray-500" colSpan={(isEditMode ? 2 : 1) + headerMonths.length}>
+                  {packedByCategory.length > 0 ? "All categories hidden. " : "No initiatives yet. "}
+                  {packedByCategory.length > 0 && hiddenCategories.size > 0 ? (
+                    <button className="text-blue-600 underline" onClick={() => setHiddenCategories(new Set())}>Show all</button>
+                  ) : null}
                 </td>
               </tr>
             ) : (
-              packedByCategory.map((group, groupIdx) => {
+              visiblePackedByCategory.map((group, groupIdx) => {
                 const groupBg = groupIdx % 2 === 0 ? "bg-white" : "bg-gray-50";
 
                 return group.lanes.map((lane, laneIdx) => (
                   <tr key={`${group.category}-lane-${laneIdx}`} className={groupBg}>
                     {laneIdx === 0 ? (
                       <td
-                        className="p-2 border-b border-r font-medium align-middle"
+                        className="p-2 border-b border-r align-middle"
                         rowSpan={group.lanes.length}
                       >
-                        {group.category}
+                        <span className="text-sm font-semibold text-gray-700">{group.category}</span>
                       </td>
                     ) : null}
 

@@ -65,6 +65,7 @@ Interactive timeline visualization for project roadmaps and initiatives. Display
 - Non-overlapping initiatives share lanes
 - Drag interactions disabled
 - Click-to-view opens read-only modal
+- Category filter chips displayed above the timeline; click to hide a category; "Show all" clears all filters
 
 **Drag interactions:**
 - Snaps to month boundaries during move/resize
@@ -220,9 +221,21 @@ Overlap detection: `aStart <= bEnd && bStart <= aEnd`
 - Ring hidden when `progress === 0`
 
 **Mode toggle:**
-- Segmented View / Edit control (replaces single toggle button)
-- Active segment: dark background (`bg-gray-900 text-white`)
-- Inactive segment: muted text with hover highlight
+- Single toggle button: shows "Edit mode" in View mode, "View mode" in Edit mode
+- Click toggles `isEditMode` boolean
+- Positioned in the top-right toolbar alongside the window controls
+
+**Category filter chips (View mode only):**
+- One chip per category present in the visible window
+- Each chip shows a colored dot (using `categoryColors`) and the category name
+- Default: all chips active (all categories visible); no filtering applied
+- Click chip to hide that category; chip becomes dimmed (`opacity-40`) with strikethrough
+- "Show all" text button appears when any categories are hidden; clears all filters
+- `hiddenCategories` state: `Set<string>`; empty = no filtering; filtered via `visiblePackedByCategory` useMemo
+
+**Today highlight:**
+- Current month column header is highlighted with `bg-blue-50 text-blue-600`
+- All other month headers use `text-gray-500` on `bg-gray-100`
 
 ## User Experience (UX)
 
