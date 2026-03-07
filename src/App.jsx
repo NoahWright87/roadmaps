@@ -269,6 +269,20 @@ function labelFontSizePx(spanLen) {
 
 const DEFAULT_BAR_COLOR = "#3b82f6"; // Tailwind blue-500
 
+// Returns a CSS clip-path polygon that zig-zags on clipped edges so the bar
+// visually communicates that it extends beyond the visible window.
+function buildZigZagClipPath(clippedLeft, clippedRight) {
+  if (!clippedLeft && !clippedRight) return undefined;
+  const z = 8; // zig-zag depth in px
+  if (clippedLeft && clippedRight) {
+    return `polygon(${z}px 0%,0% 25%,${z}px 50%,0% 75%,${z}px 100%,calc(100% - ${z}px) 100%,100% 75%,calc(100% - ${z}px) 50%,100% 25%,calc(100% - ${z}px) 0%)`;
+  }
+  if (clippedLeft) {
+    return `polygon(${z}px 0%,0% 25%,${z}px 50%,0% 75%,${z}px 100%,100% 100%,100% 0%)`;
+  }
+  return `polygon(0% 0%,0% 100%,calc(100% - ${z}px) 100%,100% 75%,calc(100% - ${z}px) 50%,100% 25%,calc(100% - ${z}px) 0%)`;
+}
+
 function ProgressRing({ pct }) {
   if (!pct) return null;
   const r = 7;
@@ -365,24 +379,54 @@ export default function RoadmapTimelineMock() {
 
   const monthYms = useMemo(() => months.map(dateToYm), [months]);
 
+  // Convert a YM string to a column index relative to the window.
+  // Returns negative values for months before the window, and values > maxIdx for months after.
+  function ymToVirtualIdx(ym) {
+    if (monthYms.length === 0) return 0;
+    const base   = ymToDate(monthYms[0]);
+    const target = ymToDate(ym);
+    return (target.getFullYear() - base.getFullYear()) * 12 + (target.getMonth() - base.getMonth());
+  }
+
+  // Convert an arbitrary column index (possibly out-of-window) to a real YM string.
+  function idxToYm(i) {
+    if (monthYms.length === 0) return monthYms[0] ?? "";
+    const clamped = clamp(i, 0, monthYms.length - 1);
+    const offset  = i - clamped;
+    if (offset === 0) return monthYms[clamped];
+    const d = ymToDate(monthYms[clamped]);
+    d.setMonth(d.getMonth() + offset);
+    return dateToYm(d);
+  }
+
   const withIdx = useMemo(() => {
+    if (monthYms.length === 0) return [];
     const idx = new Map(monthYms.map((ym, i) => [ym, i]));
+    const winStart = monthYms[0];
+    const winEnd   = monthYms[monthYms.length - 1];
 
     return initiatives
       .map((it) => {
         const snapped = snapDateRangeToMonthBounds(it.startDate, it.endDate);
         if (!snapped) return null;
 
-        const startIdx = idx.get(snapped.startYm);
-        const endIdx = idx.get(snapped.endYm);
+        // Drop entirely if initiative doesn't overlap the visible window at all.
+        if (snapped.endYm < winStart || snapped.startYm > winEnd) return null;
+
+        const clippedLeft  = snapped.startYm < winStart;
+        const clippedRight = snapped.endYm   > winEnd;
+        const startIdx = clippedLeft  ? 0                    : idx.get(snapped.startYm);
+        const endIdx   = clippedRight ? monthYms.length - 1  : idx.get(snapped.endYm);
         if (startIdx == null || endIdx == null) return null;
 
         return {
           ...it,
-          startYm: snapped.startYm,
-          endYm: snapped.endYm,
-          startIdx,
+          startYm: snapped.startYm, // actual YM (may be before window)
+          endYm:   snapped.endYm,   // actual YM (may be after window)
+          startIdx,   // display col index, clamped to [0, maxIdx]
           endIdx,
+          clippedLeft,
+          clippedRight,
         };
       })
       .filter(Boolean);
@@ -554,15 +598,21 @@ export default function RoadmapTimelineMock() {
   }
 
   function beginDrag(initiativeId, mode, cellIdx, startIdx, endIdx) {
-    const len = endIdx - startIdx;
+    // Use the initiative's actual (possibly out-of-window) YMs to compute the
+    // true virtual indices. This ensures grab-offset and resize anchors are
+    // correct even when the bar is clipped at the window boundary.
+    const itData = withIdx.find((x) => x.id === initiativeId);
+    const initStartIdx = itData ? ymToVirtualIdx(itData.startYm) : startIdx;
+    const initEndIdx   = itData ? ymToVirtualIdx(itData.endYm)   : endIdx;
+    const len = initEndIdx - initStartIdx;
     dragRef.current = {
       active: true,
       moved: false,
       initiativeId,
       mode,
-      initStartIdx: startIdx,
-      initEndIdx: endIdx,
-      grabOffset: mode === "move" ? clamp(cellIdx - startIdx, 0, Math.max(0, len)) : 0,
+      initStartIdx,
+      initEndIdx,
+      grabOffset: mode === "move" ? clamp(cellIdx - initStartIdx, 0, Math.max(0, len)) : 0,
       hoverIdx: cellIdx,
       suppressClick: false,
     };
@@ -587,18 +637,26 @@ export default function RoadmapTimelineMock() {
     if (d.mode === "move") {
       const len = d.initEndIdx - d.initStartIdx;
       let newStart = d.hoverIdx - d.grabOffset;
-      newStart = clamp(newStart, 0, Math.max(0, maxIdx - len));
+      // Allow the bar to start before or end after the visible window, but
+      // ensure at least 1 column remains visible on each side.
+      newStart = clamp(newStart, -len, maxIdx);
       const newEnd = newStart + len;
       return { startIdx: newStart, endIdx: newEnd, isPreview: true };
     }
 
     if (d.mode === "resize-left") {
-      const newStart = clamp(Math.min(d.hoverIdx, d.initEndIdx), 0, maxIdx);
+      // Keep the end fixed (using the virtual end index); new start is wherever
+      // the mouse is, clamped to [0, visible-end].
+      const visEnd = clamp(d.initEndIdx, 0, maxIdx);
+      const newStart = clamp(Math.min(d.hoverIdx, visEnd), 0, maxIdx);
       return { startIdx: newStart, endIdx: d.initEndIdx, isPreview: true };
     }
 
     if (d.mode === "resize-right") {
-      const newEnd = clamp(Math.max(d.hoverIdx, d.initStartIdx), 0, maxIdx);
+      // Keep the start fixed (using virtual start index); new end is wherever
+      // the mouse is, clamped to [visible-start, maxIdx].
+      const visStart = clamp(d.initStartIdx, 0, maxIdx);
+      const newEnd = clamp(Math.max(d.hoverIdx, visStart), 0, maxIdx);
       return { startIdx: d.initStartIdx, endIdx: newEnd, isPreview: true };
     }
 
@@ -609,6 +667,13 @@ export default function RoadmapTimelineMock() {
     const d = dragRef.current;
     if (!d.active || !d.initiativeId || !d.mode) return;
 
+    // If the mouse never moved to a new column, treat it as a click (no commit).
+    if (!d.moved) {
+      dragRef.current = { ...dragRef.current, active: false, mode: null };
+      forceRerender((x) => x + 1);
+      return;
+    }
+
     const it = withIdx.find((x) => x.id === d.initiativeId);
     if (!it) {
       dragRef.current.active = false;
@@ -617,8 +682,9 @@ export default function RoadmapTimelineMock() {
     }
 
     const preview = getPreviewRangeFor(it.id, it.startIdx, it.endIdx);
-    const startYm = monthYms[clamp(preview.startIdx, 0, monthYms.length - 1)];
-    const endYm = monthYms[clamp(preview.endIdx, 0, monthYms.length - 1)];
+    // idxToYm handles out-of-window indices so bars can be dragged beyond the visible range.
+    const startYm = idxToYm(preview.startIdx);
+    const endYm   = idxToYm(preview.endIdx);
 
     setInitiatives((prev) =>
       prev.map((p) =>
@@ -636,7 +702,7 @@ export default function RoadmapTimelineMock() {
       ...dragRef.current,
       active: false,
       mode: null,
-      suppressClick: d.moved,
+      suppressClick: true,
     };
     forceRerender((x) => x + 1);
 
@@ -878,11 +944,24 @@ export default function RoadmapTimelineMock() {
                     {(() => {
                       const cells = [];
 
-                      // Precompute each initiative's (possibly previewed) month-range within this lane.
+                      // Precompute each initiative's display range for this lane.
+                      // getPreviewRangeFor may return virtual (out-of-window) indices for
+                      // the active drag bar, so we clamp them to the visible window for
+                      // rendering and set clipping flags for the zig-zag edge visual.
+                      const maxI = headerMonths.length - 1;
                       const ranges = lane.items
                         .map((it) => {
                           const pr = getPreviewRangeFor(it.id, it.startIdx, it.endIdx);
-                          return { it, startIdx: pr.startIdx, endIdx: pr.endIdx, isPreview: pr.isPreview };
+                          const clippedLeft  = pr.isPreview ? pr.startIdx < 0    : (it.clippedLeft  || false);
+                          const clippedRight = pr.isPreview ? pr.endIdx   > maxI : (it.clippedRight || false);
+                          return {
+                            it,
+                            startIdx:     Math.max(0,    pr.startIdx),
+                            endIdx:       Math.min(maxI, pr.endIdx),
+                            isPreview:    pr.isPreview,
+                            clippedLeft,
+                            clippedRight,
+                          };
                         })
                         .sort((a, b) => a.startIdx - b.startIdx);
 
@@ -922,9 +1001,19 @@ export default function RoadmapTimelineMock() {
                         const fontPx = labelFontSizePx(spanLen);
                         const shouldTruncate = spanLen <= 1;
                         const catColor = categoryColors[occ.it.category] || DEFAULT_BAR_COLOR;
+                        const clipPath = buildZigZagClipPath(occ.clippedLeft, occ.clippedRight);
+                        // Apply border-radius only on non-clipped corners so the zig-zag
+                        // edge doesn't conflict with a rounded corner on the same side.
+                        const borderRadius =
+                          occ.clippedLeft && occ.clippedRight ? "0" :
+                          occ.clippedLeft                     ? "0 0.375rem 0.375rem 0" :
+                          occ.clippedRight                    ? "0.375rem 0 0 0.375rem" :
+                          "0.375rem";
                         const barStyle = {
                           backgroundColor: catColor,
                           borderColor: catColor,
+                          borderRadius,
+                          ...(clipPath ? { clipPath } : {}),
                           ...(occ.isPreview ? { opacity: 0.55 } : {}),
                         };
 
@@ -932,7 +1021,7 @@ export default function RoadmapTimelineMock() {
                           <td
                             key={`bar-${occ.it.id}-${headerMonths[occ.startIdx]?.ym || occ.startIdx}`}
                             colSpan={spanLen}
-                            className="h-12 border-b border-r p-0 text-white border-y-2 border-x-2 rounded-md"
+                            className="h-12 border-b border-r p-0 text-white border-y-2 border-x-2"
                             style={barStyle}
                           >
                             <div
