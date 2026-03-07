@@ -70,6 +70,31 @@ function SimpleModal({ open, title, children, onClose }) {
   );
 }
 
+function BarTooltip({ it, x, y }) {
+  if (!it) return null;
+  const descSnippet =
+    it.description && it.description.length > 0
+      ? it.description.length > 120
+        ? it.description.slice(0, 120) + "…"
+        : it.description
+      : null;
+
+  return (
+    <div
+      className="fixed z-[9999] pointer-events-none"
+      style={{ left: x + 14, top: y + 14 }}
+    >
+      <div className="bg-white border rounded-xl shadow-lg p-3 max-w-xs space-y-1">
+        <div className="font-semibold text-sm leading-snug">{it.title}</div>
+        <div className="text-xs text-gray-500">{formatDateRange(it.startDate, it.endDate)}</div>
+        {descSnippet ? (
+          <div className="text-xs text-gray-700 leading-snug">{descSnippet}</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function UnstyledLabel({ label, children }) {
   return (
     <label className="grid grid-cols-1 gap-1">
@@ -172,6 +197,15 @@ function endOfMonthISO(ym) {
   d.setMonth(d.getMonth() + 1);
   d.setDate(0);
   return toISODate(d);
+}
+
+function formatDateRange(startDate, endDate) {
+  const fmt = (iso) => {
+    const d = parseISODateLocal(iso);
+    if (!d) return iso;
+    return d.toLocaleString(undefined, { month: "short", year: "numeric" });
+  };
+  return `${fmt(startDate)} – ${fmt(endDate)}`;
 }
 
 function parseISODateLocal(iso) {
@@ -428,6 +462,7 @@ export default function RoadmapTimelineMock() {
   });
 
   const [, forceRerender] = useState(0);
+  const [tooltipState, setTooltipState] = useState({ it: null, x: 0, y: 0 });
 
   function beginDrag(initiativeId, mode, cellIdx, startIdx, endIdx) {
     const len = endIdx - startIdx;
@@ -761,12 +796,26 @@ export default function RoadmapTimelineMock() {
                           >
                             <div
                               className="h-full w-full flex items-center justify-center select-none relative cursor-pointer"
-                              onMouseEnter={() => updateDrag(occ.startIdx)}
+                              onMouseEnter={(e) => {
+                                updateDrag(occ.startIdx);
+                                if (!dragRef.current.active) {
+                                  setTooltipState({ it: occ.it, x: e.clientX, y: e.clientY });
+                                }
+                              }}
                               onMouseMove={(e) => {
                                 // Keep hoverIdx accurate while moving across a spanning bar
                                 updateDrag(idxFromMouse(e, occ.startIdx, spanLen));
+                                if (!dragRef.current.active) {
+                                  setTooltipState((s) =>
+                                    s.it ? { ...s, x: e.clientX, y: e.clientY } : s
+                                  );
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                setTooltipState({ it: null, x: 0, y: 0 });
                               }}
                               onMouseDown={(e) => {
+                                setTooltipState({ it: null, x: 0, y: 0 });
                                 if (!isEditMode) return;
                                 if (e.defaultPrevented) return;
                                 const grabbedIdx = idxFromMouse(e, occ.startIdx, spanLen);
@@ -776,7 +825,6 @@ export default function RoadmapTimelineMock() {
                                 if (dragRef.current.suppressClick) return;
                                 openEdit(occ.it.id);
                               }}
-                              title="Click to view details"
                             >
                               {/* Handles (edit mode only) */}
                               {isEditMode ? (
@@ -824,6 +872,8 @@ export default function RoadmapTimelineMock() {
           </tbody>
         </table>
       </div>
+
+      <BarTooltip it={tooltipState.it} x={tooltipState.x} y={tooltipState.y} />
 
       <SimpleModal
         open={modalOpen}

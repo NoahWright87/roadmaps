@@ -217,10 +217,31 @@ User sees:
 1. User sees colored bars across timeline
 2. Categories grouped vertically with labels
 3. Bars show initiative titles (scaled to fit)
-4. Click any bar to open details modal
-5. Modal shows category, title, dates, description, links
-6. Links are clickable, open in new tab
-7. "Close" button dismisses modal
+4. Hovering a bar shows a tooltip (see Hover Tooltips below)
+5. Click any bar to open details modal
+6. Modal shows category, title, dates, description, links
+7. Links are clickable, open in new tab
+8. "Close" button dismisses modal
+
+### Hover Tooltips
+
+A lightweight tooltip appears on bar hover to surface key info without requiring a modal click.
+
+**Trigger:** `mouseenter` on a timeline bar in either View or Edit mode.
+
+**Content:**
+- Initiative title (bold)
+- Date range formatted as `Mon YYYY – Mon YYYY`
+- Description snippet (first 120 chars, truncated with `…` if longer; omitted if blank)
+- Progress percentage — reserved for when the progress field is added
+
+**Positioning:** Fixed, offset 14px right and 14px below the cursor. Follows the cursor while hovering (`mousemove`).
+
+**Dismissal:** Clears on `mouseleave` or `mousedown` (drag start). Suppressed while a drag is active.
+
+**Styling:** White background, rounded corners, drop shadow, `pointer-events-none` (never blocks interaction).
+
+**Implementation:** `BarTooltip` component renders via `tooltipState` (`{ it, x, y }`) in the main component. `formatDateRange(startDate, endDate)` formats the date range using locale-aware month names.
 
 ### Editing Workflow
 

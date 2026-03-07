@@ -8,7 +8,7 @@ Format: [keep it brief and scannable]
 
 ## WIP
 
-- *Add current progress here.*
+- Add hover tooltips on timeline bars (title, date range, description snippet); tooltip follows cursor and dismisses on mouse-out or drag start
 
 ## v1.0
 

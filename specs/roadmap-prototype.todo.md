@@ -29,10 +29,10 @@ followed by richer features like a backlog panel and filtering.
 
 ### Hover tooltips on initiative bars
 
-- [ ] Hovering a bar shows a tooltip: title, date range, description snippet, progress percentage
-- [ ] No click required — tooltip replaces the need to open the modal for basic info
-- [ ] Tooltip dismisses on mouse-out
-- [ ] Works in both View and Edit modes
+- [x] Hovering a bar shows a tooltip: title, date range, description snippet
+- [x] No click required — tooltip replaces the need to open the modal for basic info
+- [x] Tooltip dismisses on mouse-out
+- [x] Works in both View and Edit modes
 
 ### User-adjustable date window
 
