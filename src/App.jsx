@@ -393,6 +393,18 @@ export default function RoadmapTimelineMock() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [initiatives]);
 
+  const [categoryColors, setCategoryColors] = useState({});
+  const [hiddenCategories, setHiddenCategories] = useState(new Set());
+
+  function toggleCategory(cat) {
+    setHiddenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }
+
   const packedByCategory = useMemo(() => {
     const groups = new Map();
     for (const it of withIdx) {
@@ -530,17 +542,6 @@ export default function RoadmapTimelineMock() {
 
   const [, forceRerender] = useState(0);
   const [tooltipState, setTooltipState] = useState({ it: null, x: 0, y: 0 });
-  const [categoryColors, setCategoryColors] = useState({});
-  const [hiddenCategories, setHiddenCategories] = useState(new Set());
-
-  function toggleCategory(cat) {
-    setHiddenCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
-      return next;
-    });
-  }
 
   function shiftWindow(months) {
     const shift = (ym) => {
