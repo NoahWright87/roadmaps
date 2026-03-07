@@ -20,11 +20,6 @@ followed by richer features like a backlog panel and filtering.
   - Empty state — no initiatives, fresh load
 - [ ] Tests should fail visibly on layout regressions before new work is merged
 
-### General UI polish
-
-- [x] Improve typography, spacing, and color palette to suit a leadership-facing tool
-- [x] Review overall layout for at-a-glance readability
-
 ## Later
 
 ### Initiative progress indicator
@@ -42,9 +37,6 @@ followed by richer features like a backlog panel and filtering.
 
 ### Filtering in View mode
 
-- [x] Viewers can filter displayed initiatives by category
-- [x] Filters are shown as quick-toggle chips above the timeline
-- [x] Active filters are visually distinct and easy to clear (strikethrough + opacity, "Show all" button)
 - [ ] Filter by visible date range
 - [ ] Team-based filtering is handled separately by the multi-team feature (see `multi-team.todo.md`)
 

@@ -237,6 +237,12 @@ Overlap detection: `aStart <= bEnd && bStart <= aEnd`
 - Current month column header is highlighted with `bg-blue-50 text-blue-600`
 - All other month headers use `text-gray-500` on `bg-gray-100`
 
+**Typography & layout:**
+- Page title: `text-2xl font-bold tracking-tight text-gray-900`
+- Table header row: `bg-gray-100`; Category and Initiative column headers: `font-semibold text-gray-600`
+- Month column headers: `font-semibold uppercase tracking-wide`
+- Category label cells: `font-semibold text-sm text-gray-700`
+
 ## User Experience (UX)
 
 ### Initial State
