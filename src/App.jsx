@@ -70,6 +70,31 @@ function SimpleModal({ open, title, children, onClose }) {
   );
 }
 
+function BarTooltip({ it, x, y }) {
+  if (!it) return null;
+  const descSnippet =
+    it.description && it.description.length > 0
+      ? it.description.length > 120
+        ? it.description.slice(0, 120) + "…"
+        : it.description
+      : null;
+
+  return (
+    <div
+      className="fixed z-[9999] pointer-events-none"
+      style={{ left: x + 14, top: y + 14 }}
+    >
+      <div className="bg-white border rounded-xl shadow-lg p-3 max-w-xs space-y-1">
+        <div className="font-semibold text-sm leading-snug">{it.title}</div>
+        <div className="text-xs text-gray-500">{formatDateRange(it.startDate, it.endDate)}</div>
+        {descSnippet ? (
+          <div className="text-xs text-gray-700 leading-snug">{descSnippet}</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function UnstyledLabel({ label, children }) {
   return (
     <label className="grid grid-cols-1 gap-1">
@@ -174,6 +199,29 @@ function endOfMonthISO(ym) {
   return toISODate(d);
 }
 
+function snapToQuarter(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const qStart = Math.floor((m - 1) / 3) * 3 + 1; // 1, 4, 7, or 10
+  return {
+    startYm: `${y}-${String(qStart).padStart(2, "0")}`,
+    endYm: `${y}-${String(qStart + 2).padStart(2, "0")}`,
+  };
+}
+
+function snapToYear(ym) {
+  const [y] = ym.split("-").map(Number);
+  return { startYm: `${y}-01`, endYm: `${y}-12` };
+}
+
+function formatDateRange(startDate, endDate) {
+  const fmt = (iso) => {
+    const d = parseISODateLocal(iso);
+    if (!d) return iso;
+    return d.toLocaleString(undefined, { month: "short", year: "numeric" });
+  };
+  return `${fmt(startDate)} – ${fmt(endDate)}`;
+}
+
 function parseISODateLocal(iso) {
   // Avoid the built-in Date(YYYY-MM-DD) UTC parsing footgun.
   // We want month math in *local* time so month boundaries don't shift.
@@ -219,14 +267,64 @@ function labelFontSizePx(spanLen) {
   return 10;
 }
 
+const DEFAULT_BAR_COLOR = "#3b82f6"; // Tailwind blue-500
+
+// Returns a CSS clip-path polygon that zig-zags on clipped edges so the bar
+// visually communicates that it extends beyond the visible window.
+function buildZigZagClipPath(clippedLeft, clippedRight) {
+  if (!clippedLeft && !clippedRight) return undefined;
+  const z = 8; // zig-zag depth in px
+  if (clippedLeft && clippedRight) {
+    return `polygon(${z}px 0%,0% 25%,${z}px 50%,0% 75%,${z}px 100%,calc(100% - ${z}px) 100%,100% 75%,calc(100% - ${z}px) 50%,100% 25%,calc(100% - ${z}px) 0%)`;
+  }
+  if (clippedLeft) {
+    return `polygon(${z}px 0%,0% 25%,${z}px 50%,0% 75%,${z}px 100%,100% 100%,100% 0%)`;
+  }
+  return `polygon(0% 0%,0% 100%,calc(100% - ${z}px) 100%,100% 75%,calc(100% - ${z}px) 50%,100% 25%,calc(100% - ${z}px) 0%)`;
+}
+
+function ProgressRing({ pct }) {
+  if (!pct) return null;
+  const r = 7;
+  const circ = 2 * Math.PI * r;
+  const dash = (clamp(pct, 0, 100) / 100) * circ;
+  return (
+    <svg width="18" height="18" className="shrink-0" aria-label={`${pct}% complete`}>
+      <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="2" />
+      <circle
+        cx="9" cy="9" r={r}
+        fill="none" stroke="currentColor" strokeWidth="2"
+        strokeDasharray={`${dash} ${circ}`}
+        strokeLinecap="round"
+        transform="rotate(-90 9 9)"
+      />
+    </svg>
+  );
+}
+
 export default function RoadmapTimelineMock() {
   const today = new Date();
   const currentYear = today.getFullYear();
   const defaultStartYm = `${currentYear}-01`;
   const defaultEndYm = `${currentYear}-12`;
+  const todayYm = dateToYm(today);
 
   const [windowStartYm, setWindowStartYm] = useState(defaultStartYm);
   const [windowEndYm, setWindowEndYm] = useState(defaultEndYm);
+  const [windowMode, setWindowMode] = useState("year"); // "year" | "quarter"
+
+  function handleModeChange(newMode) {
+    setWindowMode(newMode);
+    if (newMode === "quarter") {
+      const { startYm, endYm } = snapToQuarter(windowStartYm);
+      setWindowStartYm(startYm);
+      setWindowEndYm(endYm);
+    } else {
+      const { startYm, endYm } = snapToYear(windowStartYm);
+      setWindowStartYm(startYm);
+      setWindowEndYm(endYm);
+    }
+  }
 
   // View vs Edit mode
   // - View: initiatives may be lane-packed within categories (non-overlapping share a row)
@@ -281,24 +379,54 @@ export default function RoadmapTimelineMock() {
 
   const monthYms = useMemo(() => months.map(dateToYm), [months]);
 
+  // Convert a YM string to a column index relative to the window.
+  // Returns negative values for months before the window, and values > maxIdx for months after.
+  function ymToVirtualIdx(ym) {
+    if (monthYms.length === 0) return 0;
+    const base   = ymToDate(monthYms[0]);
+    const target = ymToDate(ym);
+    return (target.getFullYear() - base.getFullYear()) * 12 + (target.getMonth() - base.getMonth());
+  }
+
+  // Convert an arbitrary column index (possibly out-of-window) to a real YM string.
+  function idxToYm(i) {
+    if (monthYms.length === 0) return monthYms[0] ?? "";
+    const clamped = clamp(i, 0, monthYms.length - 1);
+    const offset  = i - clamped;
+    if (offset === 0) return monthYms[clamped];
+    const d = ymToDate(monthYms[clamped]);
+    d.setMonth(d.getMonth() + offset);
+    return dateToYm(d);
+  }
+
   const withIdx = useMemo(() => {
+    if (monthYms.length === 0) return [];
     const idx = new Map(monthYms.map((ym, i) => [ym, i]));
+    const winStart = monthYms[0];
+    const winEnd   = monthYms[monthYms.length - 1];
 
     return initiatives
       .map((it) => {
         const snapped = snapDateRangeToMonthBounds(it.startDate, it.endDate);
         if (!snapped) return null;
 
-        const startIdx = idx.get(snapped.startYm);
-        const endIdx = idx.get(snapped.endYm);
+        // Drop entirely if initiative doesn't overlap the visible window at all.
+        if (snapped.endYm < winStart || snapped.startYm > winEnd) return null;
+
+        const clippedLeft  = snapped.startYm < winStart;
+        const clippedRight = snapped.endYm   > winEnd;
+        const startIdx = clippedLeft  ? 0                    : idx.get(snapped.startYm);
+        const endIdx   = clippedRight ? monthYms.length - 1  : idx.get(snapped.endYm);
         if (startIdx == null || endIdx == null) return null;
 
         return {
           ...it,
-          startYm: snapped.startYm,
-          endYm: snapped.endYm,
-          startIdx,
+          startYm: snapped.startYm, // actual YM (may be before window)
+          endYm:   snapped.endYm,   // actual YM (may be after window)
+          startIdx,   // display col index, clamped to [0, maxIdx]
           endIdx,
+          clippedLeft,
+          clippedRight,
         };
       })
       .filter(Boolean);
@@ -308,6 +436,18 @@ export default function RoadmapTimelineMock() {
     const set = new Set(initiatives.map((i) => (i.category || "").trim()).filter(Boolean));
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [initiatives]);
+
+  const [categoryColors, setCategoryColors] = useState({});
+  const [hiddenCategories, setHiddenCategories] = useState(new Set());
+
+  function toggleCategory(cat) {
+    setHiddenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }
 
   const packedByCategory = useMemo(() => {
     const groups = new Map();
@@ -324,6 +464,11 @@ export default function RoadmapTimelineMock() {
         return { category, lanes: packIntoLanes(items) };
       });
   }, [withIdx, isEditMode]);
+
+  const visiblePackedByCategory = useMemo(() => {
+    if (isEditMode || hiddenCategories.size === 0) return packedByCategory;
+    return packedByCategory.filter((g) => !hiddenCategories.has(g.category));
+  }, [packedByCategory, hiddenCategories, isEditMode]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -355,10 +500,14 @@ export default function RoadmapTimelineMock() {
           links: [],
           startDate: startOfMonthISO(startYm),
           endDate: endOfMonthISO(endYm),
+          progress: 0,
         };
       })();
 
-    setDraft(JSON.parse(JSON.stringify(base)));
+    setDraft(JSON.parse(JSON.stringify({
+      ...base,
+      categoryColor: categoryColors[(base.category || "").trim() || "Uncategorized"] || "",
+    })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalOpen, editingId]);
 
@@ -384,8 +533,11 @@ export default function RoadmapTimelineMock() {
     const snapped = snapDateRangeToMonthBounds(draft.startDate, draft.endDate);
     if (!snapped) return;
 
+    // Strip UI-only draft fields before persisting to initiatives
+    const { categoryColor, ...draftData } = draft;
+
     const cleaned = {
-      ...draft,
+      ...draftData,
       category: (draft.category || "Uncategorized").trim() || "Uncategorized",
       title: draft.title.trim(),
       description: (draft.description || "").trim(),
@@ -397,6 +549,7 @@ export default function RoadmapTimelineMock() {
         })),
       startDate: snapped.startDate,
       endDate: snapped.endDate,
+      progress: clamp(Math.round(draft.progress || 0), 0, 100),
     };
 
     setInitiatives((prev) => {
@@ -404,6 +557,10 @@ export default function RoadmapTimelineMock() {
       if (!exists) return [...prev, cleaned];
       return prev.map((p) => (p.id === cleaned.id ? cleaned : p));
     });
+
+    if (categoryColor) {
+      setCategoryColors((prev) => ({ ...prev, [cleaned.category]: categoryColor }));
+    }
 
     closeModal();
   }
@@ -428,17 +585,34 @@ export default function RoadmapTimelineMock() {
   });
 
   const [, forceRerender] = useState(0);
+  const [tooltipState, setTooltipState] = useState({ it: null, x: 0, y: 0 });
+
+  function shiftWindow(months) {
+    const shift = (ym) => {
+      const d = ymToDate(ym);
+      d.setMonth(d.getMonth() + months);
+      return dateToYm(d);
+    };
+    setWindowStartYm((prev) => shift(prev));
+    setWindowEndYm((prev) => shift(prev));
+  }
 
   function beginDrag(initiativeId, mode, cellIdx, startIdx, endIdx) {
-    const len = endIdx - startIdx;
+    // Use the initiative's actual (possibly out-of-window) YMs to compute the
+    // true virtual indices. This ensures grab-offset and resize anchors are
+    // correct even when the bar is clipped at the window boundary.
+    const itData = withIdx.find((x) => x.id === initiativeId);
+    const initStartIdx = itData ? ymToVirtualIdx(itData.startYm) : startIdx;
+    const initEndIdx   = itData ? ymToVirtualIdx(itData.endYm)   : endIdx;
+    const len = initEndIdx - initStartIdx;
     dragRef.current = {
       active: true,
       moved: false,
       initiativeId,
       mode,
-      initStartIdx: startIdx,
-      initEndIdx: endIdx,
-      grabOffset: mode === "move" ? clamp(cellIdx - startIdx, 0, Math.max(0, len)) : 0,
+      initStartIdx,
+      initEndIdx,
+      grabOffset: mode === "move" ? clamp(cellIdx - initStartIdx, 0, Math.max(0, len)) : 0,
       hoverIdx: cellIdx,
       suppressClick: false,
     };
@@ -463,18 +637,26 @@ export default function RoadmapTimelineMock() {
     if (d.mode === "move") {
       const len = d.initEndIdx - d.initStartIdx;
       let newStart = d.hoverIdx - d.grabOffset;
-      newStart = clamp(newStart, 0, Math.max(0, maxIdx - len));
+      // Allow the bar to start before or end after the visible window, but
+      // ensure at least 1 column remains visible on each side.
+      newStart = clamp(newStart, -len, maxIdx);
       const newEnd = newStart + len;
       return { startIdx: newStart, endIdx: newEnd, isPreview: true };
     }
 
     if (d.mode === "resize-left") {
-      const newStart = clamp(Math.min(d.hoverIdx, d.initEndIdx), 0, maxIdx);
+      // Keep the end fixed (using the virtual end index); new start is wherever
+      // the mouse is, clamped to [0, visible-end].
+      const visEnd = clamp(d.initEndIdx, 0, maxIdx);
+      const newStart = clamp(Math.min(d.hoverIdx, visEnd), 0, maxIdx);
       return { startIdx: newStart, endIdx: d.initEndIdx, isPreview: true };
     }
 
     if (d.mode === "resize-right") {
-      const newEnd = clamp(Math.max(d.hoverIdx, d.initStartIdx), 0, maxIdx);
+      // Keep the start fixed (using virtual start index); new end is wherever
+      // the mouse is, clamped to [visible-start, maxIdx].
+      const visStart = clamp(d.initStartIdx, 0, maxIdx);
+      const newEnd = clamp(Math.max(d.hoverIdx, visStart), 0, maxIdx);
       return { startIdx: d.initStartIdx, endIdx: newEnd, isPreview: true };
     }
 
@@ -485,6 +667,13 @@ export default function RoadmapTimelineMock() {
     const d = dragRef.current;
     if (!d.active || !d.initiativeId || !d.mode) return;
 
+    // If the mouse never moved to a new column, treat it as a click (no commit).
+    if (!d.moved) {
+      dragRef.current = { ...dragRef.current, active: false, mode: null };
+      forceRerender((x) => x + 1);
+      return;
+    }
+
     const it = withIdx.find((x) => x.id === d.initiativeId);
     if (!it) {
       dragRef.current.active = false;
@@ -493,8 +682,9 @@ export default function RoadmapTimelineMock() {
     }
 
     const preview = getPreviewRangeFor(it.id, it.startIdx, it.endIdx);
-    const startYm = monthYms[clamp(preview.startIdx, 0, monthYms.length - 1)];
-    const endYm = monthYms[clamp(preview.endIdx, 0, monthYms.length - 1)];
+    // idxToYm handles out-of-window indices so bars can be dragged beyond the visible range.
+    const startYm = idxToYm(preview.startIdx);
+    const endYm   = idxToYm(preview.endIdx);
 
     setInitiatives((prev) =>
       prev.map((p) =>
@@ -512,7 +702,7 @@ export default function RoadmapTimelineMock() {
       ...dragRef.current,
       active: false,
       mode: null,
-      suppressClick: d.moved,
+      suppressClick: true,
     };
     forceRerender((x) => x + 1);
 
@@ -533,6 +723,13 @@ export default function RoadmapTimelineMock() {
       spanEndIdx: preview.endIdx,
     };
   }
+
+  const windowLabel = useMemo(() => {
+    const [y, m] = windowStartYm.split("-").map(Number);
+    if (windowMode === "year") return `${y}`;
+    const q = Math.floor((m - 1) / 3) + 1;
+    return `Q${q} ${y}`;
+  }, [windowStartYm, windowMode]);
 
   const headerMonths = useMemo(() => {
     return months.map((d) => ({
@@ -608,56 +805,93 @@ export default function RoadmapTimelineMock() {
     <div className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Roadmap Timeline</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Roadmap Timeline</h1>
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
-          <UnstyledLabel label="Start">
-            <input
-              className="px-3 py-2 border rounded-xl"
-              type="month"
-              value={windowStartYm}
-              onChange={(e) => setWindowStartYm(e.target.value)}
-            />
-          </UnstyledLabel>
-          <UnstyledLabel label="End">
-            <input
-              className="px-3 py-2 border rounded-xl"
-              type="month"
-              value={windowEndYm}
-              onChange={(e) => setWindowEndYm(e.target.value)}
-            />
-          </UnstyledLabel>
+          <select
+            className="px-3 py-2 border rounded-xl"
+            value={windowMode}
+            onChange={(e) => handleModeChange(e.target.value)}
+          >
+            <option value="year">Yearly</option>
+            <option value="quarter">Quarterly</option>
+          </select>
 
-          {isEditMode ? (
-            <button className="px-4 py-2 border rounded-xl" onClick={openCreate}>
-              Add Initiative
+          <div className="flex items-center gap-1">
+            <button
+              className="px-2 py-2 border rounded-xl text-sm"
+              onClick={() => shiftWindow(windowMode === "quarter" ? -3 : -12)}
+              title={windowMode === "quarter" ? "Previous quarter" : "Previous year"}
+            >
+              ←
             </button>
-          ) : null}
+            <div className="px-3 py-2 border rounded-xl text-sm font-medium min-w-[80px] text-center select-none">
+              {windowLabel}
+            </div>
+            <button
+              className="px-2 py-2 border rounded-xl text-sm"
+              onClick={() => shiftWindow(windowMode === "quarter" ? 3 : 12)}
+              title={windowMode === "quarter" ? "Next quarter" : "Next year"}
+            >
+              →
+            </button>
+          </div>
 
           <button
-            className="px-4 py-2 border rounded-xl"
+            className="px-4 py-2 border rounded-xl text-sm"
             onClick={() => setIsEditMode((v) => !v)}
-            title={isEditMode ? "Switch to view mode (lane packing)" : "Switch to edit mode (one per row)"}
+            title={isEditMode ? "Switch to view mode" : "Switch to edit mode"}
           >
             {isEditMode ? "View mode" : "Edit mode"}
           </button>
         </div>
       </div>
 
+      {!isEditMode && packedByCategory.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {packedByCategory.map((g) => {
+            const hidden = hiddenCategories.has(g.category);
+            const color = categoryColors[g.category] || DEFAULT_BAR_COLOR;
+            return (
+              <button
+                key={g.category}
+                onClick={() => toggleCategory(g.category)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-sm transition-opacity ${
+                  hidden ? "opacity-40 line-through" : "opacity-100"
+                }`}
+              >
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                {g.category}
+              </button>
+            );
+          })}
+          {hiddenCategories.size > 0 ? (
+            <button
+              className="text-sm text-blue-600 hover:text-blue-800 underline"
+              onClick={() => setHiddenCategories(new Set())}
+            >
+              Show all
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="border rounded-2xl overflow-hidden">
         <table ref={tableRef} className="w-full table-fixed border-collapse">
           <thead>
-            <tr className="bg-gray-50">
-              <th className="w-[180px] text-left p-2 border-b border-r text-sm font-medium">Category</th>
+            <tr className="bg-gray-100">
+              <th className="w-[180px] text-left p-2 border-b border-r text-sm font-semibold text-gray-600">Category</th>
               {isEditMode ? (
-                <th className="w-[240px] text-left p-2 border-b border-r text-sm font-medium">Initiative</th>
+                <th className="w-[240px] text-left p-2 border-b border-r text-sm font-semibold text-gray-600">Initiative</th>
               ) : null}
               {headerMonths.map((m, idx) => (
                 <th
                   key={m.ym}
                   data-month-idx={idx}
-                  className="p-2 border-b border-r text-center text-xs font-medium"
+                  className={`p-2 border-b border-r text-center text-xs font-semibold uppercase tracking-wide ${
+                    m.ym === todayYm ? "bg-blue-50 text-blue-600" : "text-gray-500"
+                  }`}
                 >
                   {m.label}
                 </th>
@@ -666,24 +900,27 @@ export default function RoadmapTimelineMock() {
           </thead>
 
           <tbody>
-            {packedByCategory.length === 0 ? (
+            {visiblePackedByCategory.length === 0 ? (
               <tr>
-                <td className="p-4 text-sm text-gray-600" colSpan={(isEditMode ? 2 : 1) + headerMonths.length}>
-                  No initiatives yet.
+                <td className="p-4 text-sm text-gray-500" colSpan={(isEditMode ? 2 : 1) + headerMonths.length}>
+                  {packedByCategory.length > 0 ? "All categories hidden. " : "No initiatives yet. "}
+                  {packedByCategory.length > 0 && hiddenCategories.size > 0 ? (
+                    <button className="text-blue-600 underline" onClick={() => setHiddenCategories(new Set())}>Show all</button>
+                  ) : null}
                 </td>
               </tr>
             ) : (
-              packedByCategory.map((group, groupIdx) => {
+              visiblePackedByCategory.map((group, groupIdx) => {
                 const groupBg = groupIdx % 2 === 0 ? "bg-white" : "bg-gray-50";
 
                 return group.lanes.map((lane, laneIdx) => (
                   <tr key={`${group.category}-lane-${laneIdx}`} className={groupBg}>
                     {laneIdx === 0 ? (
                       <td
-                        className="p-2 border-b border-r font-medium align-middle"
+                        className="p-2 border-b border-r align-middle"
                         rowSpan={group.lanes.length}
                       >
-                        {group.category}
+                        <span className="text-sm font-semibold text-gray-700">{group.category}</span>
                       </td>
                     ) : null}
 
@@ -707,11 +944,24 @@ export default function RoadmapTimelineMock() {
                     {(() => {
                       const cells = [];
 
-                      // Precompute each initiative's (possibly previewed) month-range within this lane.
+                      // Precompute each initiative's display range for this lane.
+                      // getPreviewRangeFor may return virtual (out-of-window) indices for
+                      // the active drag bar, so we clamp them to the visible window for
+                      // rendering and set clipping flags for the zig-zag edge visual.
+                      const maxI = headerMonths.length - 1;
                       const ranges = lane.items
                         .map((it) => {
                           const pr = getPreviewRangeFor(it.id, it.startIdx, it.endIdx);
-                          return { it, startIdx: pr.startIdx, endIdx: pr.endIdx, isPreview: pr.isPreview };
+                          const clippedLeft  = pr.isPreview ? pr.startIdx < 0    : (it.clippedLeft  || false);
+                          const clippedRight = pr.isPreview ? pr.endIdx   > maxI : (it.clippedRight || false);
+                          return {
+                            it,
+                            startIdx:     Math.max(0,    pr.startIdx),
+                            endIdx:       Math.min(maxI, pr.endIdx),
+                            isPreview:    pr.isPreview,
+                            clippedLeft,
+                            clippedRight,
+                          };
                         })
                         .sort((a, b) => a.startIdx - b.startIdx);
 
@@ -750,23 +1000,52 @@ export default function RoadmapTimelineMock() {
                         const spanLen = occ.endIdx - occ.startIdx + 1;
                         const fontPx = labelFontSizePx(spanLen);
                         const shouldTruncate = spanLen <= 1;
-                        const borderColor = occ.isPreview ? "border-blue-500" : "border-blue-700";
-                        const bgClass = occ.isPreview ? "bg-blue-300" : "bg-blue-500";
+                        const catColor = categoryColors[occ.it.category] || DEFAULT_BAR_COLOR;
+                        const clipPath = buildZigZagClipPath(occ.clippedLeft, occ.clippedRight);
+                        // Apply border-radius only on non-clipped corners so the zig-zag
+                        // edge doesn't conflict with a rounded corner on the same side.
+                        const borderRadius =
+                          occ.clippedLeft && occ.clippedRight ? "0" :
+                          occ.clippedLeft                     ? "0 0.375rem 0.375rem 0" :
+                          occ.clippedRight                    ? "0.375rem 0 0 0.375rem" :
+                          "0.375rem";
+                        const barStyle = {
+                          backgroundColor: catColor,
+                          borderColor: catColor,
+                          borderRadius,
+                          ...(clipPath ? { clipPath } : {}),
+                          ...(occ.isPreview ? { opacity: 0.55 } : {}),
+                        };
 
                         cells.push(
                           <td
                             key={`bar-${occ.it.id}-${headerMonths[occ.startIdx]?.ym || occ.startIdx}`}
                             colSpan={spanLen}
-                            className={`h-12 border-b border-r p-0 ${bgClass} text-white border-y-2 border-x-2 ${borderColor} rounded-md`}
+                            className="h-12 border-b border-r p-0 text-white border-y-2 border-x-2"
+                            style={barStyle}
                           >
                             <div
                               className="h-full w-full flex items-center justify-center select-none relative cursor-pointer"
-                              onMouseEnter={() => updateDrag(occ.startIdx)}
+                              onMouseEnter={(e) => {
+                                updateDrag(occ.startIdx);
+                                if (!dragRef.current.active) {
+                                  setTooltipState({ it: occ.it, x: e.clientX, y: e.clientY });
+                                }
+                              }}
                               onMouseMove={(e) => {
                                 // Keep hoverIdx accurate while moving across a spanning bar
                                 updateDrag(idxFromMouse(e, occ.startIdx, spanLen));
+                                if (!dragRef.current.active) {
+                                  setTooltipState((s) =>
+                                    s.it ? { ...s, x: e.clientX, y: e.clientY } : s
+                                  );
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                setTooltipState({ it: null, x: 0, y: 0 });
                               }}
                               onMouseDown={(e) => {
+                                setTooltipState({ it: null, x: 0, y: 0 });
                                 if (!isEditMode) return;
                                 if (e.defaultPrevented) return;
                                 const grabbedIdx = idxFromMouse(e, occ.startIdx, spanLen);
@@ -776,7 +1055,6 @@ export default function RoadmapTimelineMock() {
                                 if (dragRef.current.suppressClick) return;
                                 openEdit(occ.it.id);
                               }}
-                              title="Click to view details"
                             >
                               {/* Handles (edit mode only) */}
                               {isEditMode ? (
@@ -802,6 +1080,12 @@ export default function RoadmapTimelineMock() {
                                 </>
                               ) : null}
 
+                              {(occ.it.progress || 0) > 0 ? (
+                                <div className="absolute top-1 right-3 pointer-events-none">
+                                  <ProgressRing pct={occ.it.progress} />
+                                </div>
+                              ) : null}
+
                               <span
                                 className={`${shouldTruncate ? "truncate" : "whitespace-normal break-words"} w-full px-2 text-center leading-tight pointer-events-none`}
                                 style={{ fontSize: `${fontPx}px` }}
@@ -825,6 +1109,16 @@ export default function RoadmapTimelineMock() {
         </table>
       </div>
 
+      {isEditMode ? (
+        <div className="flex justify-center">
+          <button className="px-4 py-2 border rounded-xl text-sm" onClick={openCreate}>
+            Add Initiative
+          </button>
+        </div>
+      ) : null}
+
+      <BarTooltip it={tooltipState.it} x={tooltipState.x} y={tooltipState.y} />
+
       <SimpleModal
         open={modalOpen}
         title={editing ? `${isModalReadOnly ? "View" : "Edit"} initiative: ${editing.title}` : "Add initiative"}
@@ -837,7 +1131,12 @@ export default function RoadmapTimelineMock() {
                 <CategoryCombobox
                   value={draft.category}
                   options={categorySuggestions}
-                  onChange={(v) => setDraft((d) => ({ ...d, category: v }))}
+                  onChange={(v) => setDraft((d) => ({
+                    ...d,
+                    category: v,
+                    // Load saved color for the new category, or keep the current draft color
+                    categoryColor: categoryColors[(v || "").trim() || "Uncategorized"] ?? d.categoryColor,
+                  }))}
                   disabled={isModalReadOnly}
                 />
               </UnstyledLabel>
@@ -850,6 +1149,62 @@ export default function RoadmapTimelineMock() {
                   onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
                   placeholder="Initiative name"
                 />
+              </UnstyledLabel>
+
+              <UnstyledLabel label={`Color — ${draft.category || "Uncategorized"}`}>
+                {isModalReadOnly ? (
+                  <div className="flex items-center gap-2 py-2">
+                    <div
+                      className="w-6 h-6 rounded-md border"
+                      style={{ backgroundColor: draft.categoryColor || DEFAULT_BAR_COLOR }}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 py-1">
+                    <input
+                      type="color"
+                      className="h-9 w-9 rounded-lg border cursor-pointer p-0.5"
+                      value={draft.categoryColor || DEFAULT_BAR_COLOR}
+                      onChange={(e) => setDraft((d) => ({ ...d, categoryColor: e.target.value }))}
+                    />
+                    {draft.categoryColor ? (
+                      <button
+                        type="button"
+                        className="text-xs text-gray-500 hover:text-gray-700 underline"
+                        onClick={() => setDraft((d) => ({ ...d, categoryColor: "" }))}
+                      >
+                        Reset to default
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">default blue</span>
+                    )}
+                  </div>
+                )}
+              </UnstyledLabel>
+
+              <UnstyledLabel label="Progress">
+                {isModalReadOnly ? (
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${draft.progress || 0}%`, backgroundColor: draft.categoryColor || DEFAULT_BAR_COLOR }}
+                      />
+                    </div>
+                    <span className="text-sm tabular-nums w-10 text-right">{draft.progress || 0}%</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 py-1">
+                    <input
+                      type="range"
+                      min="0" max="100" step="5"
+                      className="flex-1"
+                      value={draft.progress || 0}
+                      onChange={(e) => setDraft((d) => ({ ...d, progress: parseInt(e.target.value, 10) }))}
+                    />
+                    <span className="text-sm tabular-nums w-10 text-right">{draft.progress || 0}%</span>
+                  </div>
+                )}
               </UnstyledLabel>
 
               <UnstyledLabel label="Start date">

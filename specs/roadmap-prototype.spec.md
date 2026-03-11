@@ -65,6 +65,7 @@ Interactive timeline visualization for project roadmaps and initiatives. Display
 - Non-overlapping initiatives share lanes
 - Drag interactions disabled
 - Click-to-view opens read-only modal
+- Category filter chips displayed above the timeline; click to hide a category; "Show all" clears all filters
 
 **Drag interactions:**
 - Snaps to month boundaries during move/resize
@@ -110,10 +111,11 @@ Interactive timeline visualization for project roadmaps and initiatives. Display
 
 **Update:**
 1. Open initiative in edit mode
-2. Modify fields (category, title, dates, description, links)
+2. Modify fields (category, title, dates, description, links, progress, category color)
 3. Dates auto-snap to month boundaries on save
 4. Empty links filtered out on save
 5. Link labels default to URL if blank
+6. Category color saved to `categoryColors` map on save (affects all initiatives in that category)
 
 **Delete:**
 1. Open initiative in edit mode
@@ -150,10 +152,14 @@ Enabled only in edit mode. See [drag-interactions.spec.md](drag-interactions.spe
 - Reversed ranges automatically swapped
 
 **Window controls:**
-- Month input pickers set window start/end
-- Reversed windows handled (renders swapped range)
-- Default window: January–December of current year
-- Initiatives outside window not rendered (filtered by month index)
+- **View selector** (`Yearly` / `Quarterly`) sets the window granularity
+  - Yearly: window spans 12 months (Jan–Dec of a year)
+  - Quarterly: window spans 3 months, snapped to quarter boundaries (Q1 = Jan–Mar, Q2 = Apr–Jun, Q3 = Jul–Sep, Q4 = Oct–Dec)
+  - Switching modes snaps to the nearest valid boundary using `snapToQuarter` / `snapToYear`
+- **← / → navigation buttons** shift by 3 months (quarterly) or 12 months (yearly)
+- A read-only label shows the current period (`2026` or `Q1 2026`)
+- Default: Yearly, current calendar year
+- Initiatives outside the visible window are not rendered (filtered by month index)
 
 ### Category Management
 
@@ -196,10 +202,46 @@ Overlap detection: `aStart <= bEnd && bStart <= aEnd`
 - Longer spans use word wrap
 
 **Bar styling:**
-- Default: blue-500 background, blue-700 border
-- Preview (during drag): blue-300 background, blue-500 border
-- 2px borders on all sides, rounded corners
+- Color driven by `categoryColors` map (category name → hex). Falls back to `#3b82f6` (blue-500) if unset.
+- Preview (during drag): same color at 55% opacity
+- 2px borders (same color as background), rounded corners
 - White text, center-aligned
+- Progress ring (SVG donut) shown in top-right corner when `progress > 0`
+
+**Category colors:**
+- `categoryColors` state: `{ [categoryName]: hexColor }` — shared across all initiatives in a category
+- Set via `<input type="color">` in the initiative edit modal
+- Persists for the session; resets on page reload (no external storage yet)
+- "Reset to default" button clears the category's color entry
+
+**Progress indicator:**
+- `progress` field on initiative: integer 0–100, defaults to 0
+- Slider input (step 5) in the edit modal; read-only bar in view modal
+- `ProgressRing` SVG component: donut ring in top-right corner of bar, `currentColor` (white on colored bars)
+- Ring hidden when `progress === 0`
+
+**Mode toggle:**
+- Single toggle button: shows "Edit mode" in View mode, "View mode" in Edit mode
+- Click toggles `isEditMode` boolean
+- Positioned in the top-right toolbar alongside the window controls
+
+**Category filter chips (View mode only):**
+- One chip per category present in the visible window
+- Each chip shows a colored dot (using `categoryColors`) and the category name
+- Default: all chips active (all categories visible); no filtering applied
+- Click chip to hide that category; chip becomes dimmed (`opacity-40`) with strikethrough
+- "Show all" text button appears when any categories are hidden; clears all filters
+- `hiddenCategories` state: `Set<string>`; empty = no filtering; filtered via `visiblePackedByCategory` useMemo
+
+**Today highlight:**
+- Current month column header is highlighted with `bg-blue-50 text-blue-600`
+- All other month headers use `text-gray-500` on `bg-gray-100`
+
+**Typography & layout:**
+- Page title: `text-2xl font-bold tracking-tight text-gray-900`
+- Table header row: `bg-gray-100`; Category and Initiative column headers: `font-semibold text-gray-600`
+- Month column headers: `font-semibold uppercase tracking-wide`
+- Category label cells: `font-semibold text-sm text-gray-700`
 
 ## User Experience (UX)
 
@@ -217,10 +259,31 @@ User sees:
 1. User sees colored bars across timeline
 2. Categories grouped vertically with labels
 3. Bars show initiative titles (scaled to fit)
-4. Click any bar to open details modal
-5. Modal shows category, title, dates, description, links
-6. Links are clickable, open in new tab
-7. "Close" button dismisses modal
+4. Hovering a bar shows a tooltip (see Hover Tooltips below)
+5. Click any bar to open details modal
+6. Modal shows category, title, dates, description, links
+7. Links are clickable, open in new tab
+8. "Close" button dismisses modal
+
+### Hover Tooltips
+
+A lightweight tooltip appears on bar hover to surface key info without requiring a modal click.
+
+**Trigger:** `mouseenter` on a timeline bar in either View or Edit mode.
+
+**Content:**
+- Initiative title (bold)
+- Date range formatted as `Mon YYYY – Mon YYYY`
+- Description snippet (first 120 chars, truncated with `…` if longer; omitted if blank)
+- Progress percentage — reserved for when the progress field is added
+
+**Positioning:** Fixed, offset 14px right and 14px below the cursor. Follows the cursor while hovering (`mousemove`).
+
+**Dismissal:** Clears on `mouseleave` or `mousedown` (drag start). Suppressed while a drag is active.
+
+**Styling:** White background, rounded corners, drop shadow, `pointer-events-none` (never blocks interaction).
+
+**Implementation:** `BarTooltip` component renders via `tooltipState` (`{ it, x, y }`) in the main component. `formatDateRange(startDate, endDate)` formats the date range using locale-aware month names.
 
 ### Editing Workflow
 
